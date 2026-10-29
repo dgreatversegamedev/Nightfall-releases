@@ -3,86 +3,88 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Nightfall – Updates</title>
+<title>Nightfall – Download</title>
 <style>
-  :root{--bg:#0d0d10;--card:#17171c;--text:#eee;--dim:#9a9aa5;--accent:#e23b3b}
+  :root{--bg:#07080d;--card:#10121a;--text:#eee;--dim:#9a9aa5;--accent:#2f6bff;--glow:#2f6bff55}
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;line-height:1.5}
+  body{margin:0;background:radial-gradient(ellipse at 50% 0%,#0f1a3a 0%,var(--bg) 60%) fixed;
+       color:var(--text);font-family:system-ui,sans-serif;line-height:1.5;min-height:100vh}
   main{max-width:640px;margin:0 auto;padding:24px 16px}
-  h1{margin:0 0 4px;letter-spacing:3px}
+  .hero{text-align:center}
+  .helmet{width:min(78%,340px);height:auto;display:block;margin:0 auto -10px;
+          filter:drop-shadow(0 0 28px var(--glow));animation:float 5s ease-in-out infinite}
+  @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+  h1{margin:0 0 4px;letter-spacing:6px;font-size:2.2rem;text-shadow:0 0 18px var(--glow)}
+  h2{margin:0 0 4px}
   .sub{color:var(--dim);margin-bottom:24px}
-  .card{background:var(--card);border-radius:12px;padding:18px;margin-bottom:16px}
-  .btn{display:inline-block;background:var(--accent);color:#fff;text-decoration:none;
-       padding:12px 22px;border-radius:8px;font-weight:700;margin-top:10px}
+  .card .sub{margin-bottom:8px}
+  .card{background:var(--card);border:1px solid #1d2233;border-radius:12px;padding:18px;margin-bottom:16px}
+  .btn{display:block;text-align:center;background:var(--accent);color:#fff;text-decoration:none;
+       padding:15px 22px;border-radius:10px;font-weight:700;font-size:1.05rem;margin-top:14px;
+       box-shadow:0 0 22px var(--glow);animation:pulse 2.4s ease-in-out infinite}
+  .btn:active{transform:scale(.98)}
+  @keyframes pulse{0%,100%{box-shadow:0 0 14px var(--glow)}50%{box-shadow:0 0 30px #2f6bffaa}}
+  .size{display:block;text-align:center;color:var(--dim);font-size:.85rem;margin-top:8px}
   .notes{white-space:pre-wrap;color:var(--dim);margin-top:8px}
-  .old a{color:var(--text)} .old li{margin:6px 0}
   footer{color:var(--dim);font-size:.85rem;text-align:center;margin-top:30px}
   footer a{color:var(--dim)}
 </style>
 </head>
 <body>
 <main>
-  <h1>NIGHTFALL</h1>
-  <div class="sub">Android updates</div>
+  <div class="hero">
+    <img class="helmet" src="helmet.png" alt="Nightfall helmet">
+    <h1>NIGHTFALL</h1>
+    <div class="sub">Android updates</div>
+  </div>
 
-  <div class="card" id="latest">Checking for the latest version…</div>
-
-  <div class="card old" id="oldCard" hidden>
-    <strong>Older versions</strong>
-    <ul id="old"></ul>
+  <div class="card" id="latest">
+    <div id="info">Checking for the latest version…</div>
+    <a class="btn" id="dl" href="#">Download Nightfall APK</a>
+    <span class="size" id="size"></span>
   </div>
 
   <footer><a href="privacy.html">Privacy Policy</a></footer>
 </main>
 
 <script>
-const REPO = "officialDgreatverse/REPO_NAME";
+const REPO = "dgreatversegamedev/Nightfall-releases";
 
-function apkOf(r){
-  const a = (r.assets || []).find(x => x.name.endsWith(".apk"));
-  return a ? a.browser_download_url : null;
-}
+// Must match the APK file name on your release (case-sensitive).
+// Only used as the backup link if GitHub's info can't be loaded.
+const APK_NAME = "Nightfall.apk";
+
+const dl = document.getElementById("dl");
+const info = document.getElementById("info");
+const sizeEl = document.getElementById("size");
+
+// Works right away, always points to the newest release's APK
+dl.href = `https://github.com/${REPO}/releases/latest/download/${APK_NAME}`;
 
 async function load(){
-  const box = document.getElementById("latest");
   try{
-    const res = await fetch(`https://api.github.com/repos/${REPO}/releases`);
+    const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`);
     if(!res.ok) throw new Error(res.status);
-    const list = (await res.json()).filter(r => !r.draft && !r.prerelease);
-    if(!list.length){ box.textContent = "No releases yet."; return; }
+    const r = await res.json();
+    const apk = (r.assets || []).find(a => a.name.toLowerCase().endsWith(".apk"));
 
-    const r = list[0], url = apkOf(r);
-    box.innerHTML = "";
+    info.innerHTML = "";
     const h = document.createElement("h2");
-    h.textContent = "Latest: " + r.tag_name;
+    h.textContent = "Latest: " + (r.name || r.tag_name);
     const d = document.createElement("div");
     d.className = "sub";
     d.textContent = new Date(r.published_at).toLocaleDateString();
     const n = document.createElement("div");
     n.className = "notes";
     n.textContent = r.body || "";
-    box.append(h, d, n);
-    if(url){
-      const b = document.createElement("a");
-      b.className = "btn"; b.href = url; b.textContent = "Download APK";
-      box.append(b);
-    }
+    info.append(h, d, n);
 
-    const rest = list.slice(1);
-    if(rest.length){
-      const ul = document.getElementById("old");
-      rest.forEach(o => {
-        const u = apkOf(o); if(!u) return;
-        const li = document.createElement("li");
-        const a = document.createElement("a");
-        a.href = u; a.textContent = o.tag_name;
-        li.append(a);
-        ul.append(li);
-      });
-      document.getElementById("oldCard").hidden = false;
+    if(apk){
+      dl.href = apk.browser_download_url;
+      sizeEl.textContent = r.tag_name + " · " + (apk.size / 1048576).toFixed(1) + " MB · APK";
     }
   }catch(e){
-    box.textContent = "Couldn't load updates. Please try again later.";
+    info.textContent = "Get the latest version of Nightfall:";
   }
 }
 load();
