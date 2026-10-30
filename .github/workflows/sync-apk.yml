@@ -14,7 +14,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check latest release tag
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          LATEST=$(gh release view --repo dgreatversegamedev/Nightfall-releases --json tagName --jq .tagName)
+          SAVED=""
+          if [ -f synced-tag.txt ]; then SAVED=$(cat synced-tag.txt); fi
+          echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
+          if [ "$LATEST" = "$SAVED" ] && [ -f Nightfall-latest.apk ]; then
+            echo "new=false" >> "$GITHUB_OUTPUT"
+            echo "Already synced $LATEST, nothing to do."
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Download latest release APK
+        if: steps.check.outputs.new == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -24,13 +41,15 @@ jobs:
             --output Nightfall-latest.apk \
             --clobber
 
-      - name: Commit only if the APK changed
+      - name: Commit the new APK
+        if: steps.check.outputs.new == 'true'
         run: |
+          echo "${{ steps.check.outputs.latest }}" > synced-tag.txt
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add Nightfall-latest.apk
+          git add Nightfall-latest.apk synced-tag.txt
           if git diff --cached --quiet; then
-            echo "No new APK."
+            echo "No changes."
           else
             git commit -m "Update Nightfall-latest.apk"
             git push
