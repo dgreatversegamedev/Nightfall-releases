@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Nightfall – Download</title>
 <style>
-  :root{--bg:#07080d;--card:#10121a;--text:#eee;--dim:#9a9aa5;--accent:#2f6bff;--glow:#2f6bff55}
+  :root{--bg:#07080d;--card:#10121a;--text:#eee;--dim:#9a9aa5;--accent:#2f6bff;--glow:#2f6bff55;--ok:#2fd27a;--bad:#ff5d5d}
   *{box-sizing:border-box}
   body{margin:0;background:radial-gradient(ellipse at 50% 0%,#0f1a3a 0%,var(--bg) 60%) fixed;
        color:var(--text);font-family:system-ui,sans-serif;line-height:1.5;min-height:100vh}
@@ -19,13 +19,22 @@
   .sub{color:var(--dim);margin-bottom:24px}
   .card .sub{margin-bottom:8px}
   .card{background:var(--card);border:1px solid #1d2233;border-radius:12px;padding:18px;margin-bottom:16px}
-  .btn{display:block;text-align:center;background:var(--accent);color:#fff;text-decoration:none;
-       padding:15px 22px;border-radius:10px;font-weight:700;font-size:1.05rem;margin-top:14px;
+  .btn{display:block;width:100%;border:0;cursor:pointer;text-align:center;background:var(--accent);color:#fff;text-decoration:none;
+       padding:15px 22px;border-radius:10px;font-weight:700;font-size:1.05rem;margin-top:14px;font-family:inherit;
        box-shadow:0 0 22px var(--glow);animation:pulse 2.4s ease-in-out infinite}
   .btn:active{transform:scale(.98)}
+  .btn:disabled{opacity:.6;animation:none;cursor:default}
+  .btn.alt{background:#1d2233;box-shadow:none;animation:none}
   @keyframes pulse{0%,100%{box-shadow:0 0 14px var(--glow)}50%{box-shadow:0 0 30px #2f6bffaa}}
   .size{display:block;text-align:center;color:var(--dim);font-size:.85rem;margin-top:8px}
   .notes{white-space:pre-wrap;color:var(--dim);margin-top:8px}
+  .prog{display:none;margin-top:14px}
+  .bar{height:12px;background:#1d2233;border-radius:99px;overflow:hidden}
+  .fill{height:100%;width:0;background:var(--accent);box-shadow:0 0 12px var(--glow);transition:width .15s}
+  .ptxt{display:flex;justify-content:space-between;color:var(--dim);font-size:.85rem;margin-top:6px}
+  .msg{margin-top:12px;text-align:center;font-size:.95rem}
+  .msg.ok{color:var(--ok)} .msg.bad{color:var(--bad)}
+  .warn{display:none;background:#2a2410;border:1px solid #5a4a14;color:#ffd96b;border-radius:10px;padding:12px;margin-bottom:16px;font-size:.92rem}
   footer{color:var(--dim);font-size:.85rem;text-align:center;margin-top:30px}
   footer a{color:var(--dim)}
 </style>
@@ -38,9 +47,21 @@
     <div class="sub">Android updates</div>
   </div>
 
+  <div class="warn" id="inapp">
+    You're inside an app's browser (TikTok, etc.), which can block APK downloads.
+    Tap <b>Open in Chrome</b> below for a smooth download.
+    <a class="btn alt" id="chromeBtn" href="#">Open in Chrome</a>
+  </div>
+
   <div class="card" id="latest">
     <div id="info">Checking for the latest version…</div>
-    <a class="btn" id="dl" href="#">Download Nightfall APK</a>
+    <button class="btn" id="dl" type="button">Download Nightfall APK</button>
+
+    <div class="prog" id="prog">
+      <div class="bar"><div class="fill" id="fill"></div></div>
+      <div class="ptxt"><span id="pct">0%</span><span id="mb"></span></div>
+    </div>
+    <div class="msg" id="msg"></div>
     <span class="size" id="size"></span>
   </div>
 
@@ -50,17 +71,82 @@
 <script>
 const REPO = "dgreatversegamedev/Nightfall-releases";
 
-// Must match the APK file name on your release (case-sensitive).
-// Only used as the backup link if GitHub's info can't be loaded.
+// Backup name, only used if GitHub's release info can't be loaded.
 const APK_NAME = "Nightfall.apk";
 
-const dl = document.getElementById("dl");
-const info = document.getElementById("info");
-const sizeEl = document.getElementById("size");
+const $ = id => document.getElementById(id);
+const dl = $("dl"), info = $("info"), sizeEl = $("size");
+const prog = $("prog"), fill = $("fill"), pct = $("pct"), mb = $("mb"), msg = $("msg");
 
-// Works right away, always points to the newest release's APK
-dl.href = `https://github.com/${REPO}/releases/latest/download/${APK_NAME}`;
+let asset = null;                 // {id, name, size, url}
+const backupLink = `https://github.com/${REPO}/releases/latest/download/${APK_NAME}`;
 
+// ---- In-app browser detection (TikTok, Instagram, Facebook, generic WebView) ----
+const ua = navigator.userAgent;
+const inApp = /TikTok|musical_ly|Bytedance|Instagram|FBAN|FBAV|Snapchat|Line\/|; wv\)/i.test(ua);
+if (inApp && /Android/i.test(ua)) {
+  $("inapp").style.display = "block";
+  const u = new URL(location.href);
+  $("chromeBtn").href =
+    `intent://${u.host}${u.pathname}${u.search}#Intent;scheme=https;package=com.android.chrome;end`;
+}
+
+function setMsg(text, cls){ msg.textContent = text; msg.className = "msg " + (cls || ""); }
+
+// ---- Download inside THIS page, so Chrome's "keep this file?" prompt shows here ----
+async function startDownload(){
+  if (!asset) { location.href = backupLink; return; }
+
+  dl.disabled = true;
+  dl.textContent = "Downloading…";
+  prog.style.display = "block";
+  setMsg("");
+  fill.style.width = "0%"; pct.textContent = "0%";
+
+  try {
+    const res = await fetch(asset.url, { headers: { Accept: "application/octet-stream" } });
+    if (!res.ok || !res.body) throw new Error("HTTP " + res.status);
+
+    const total = Number(res.headers.get("content-length")) || asset.size;
+    const reader = res.body.getReader();
+    const chunks = [];
+    let got = 0;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      got += value.length;
+      const p = Math.min(100, (got / total) * 100);
+      fill.style.width = p.toFixed(1) + "%";
+      pct.textContent = Math.floor(p) + "%";
+      mb.textContent = (got / 1048576).toFixed(1) + " / " + (total / 1048576).toFixed(1) + " MB";
+    }
+
+    fill.style.width = "100%"; pct.textContent = "100%";
+    const blob = new Blob(chunks, { type: "application/vnd.android.package-archive" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = asset.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+
+    setMsg("Downloaded. If Chrome asks to keep the file, tap Download/Keep, then open it to install.", "ok");
+    dl.textContent = "Download again";
+    dl.disabled = false;
+  } catch (e) {
+    setMsg("Download failed. Check your connection and tap Retry.", "bad");
+    dl.textContent = "Retry download";
+    dl.disabled = false;
+    prog.style.display = "none";
+  }
+}
+dl.addEventListener("click", startDownload);
+
+// ---- Load latest release info ----
 async function load(){
   try{
     const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`);
@@ -80,7 +166,12 @@ async function load(){
     info.append(h, d, n);
 
     if(apk){
-      dl.href = apk.browser_download_url;
+      asset = {
+        id: apk.id,
+        name: apk.name,
+        size: apk.size,
+        url: `https://api.github.com/repos/${REPO}/releases/assets/${apk.id}`
+      };
       sizeEl.textContent = r.tag_name + " · " + (apk.size / 1048576).toFixed(1) + " MB · APK";
     }
   }catch(e){
