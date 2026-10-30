@@ -1,1 +1,37 @@
+name: Sync latest Nightfall APK
 
+on:
+  schedule:
+    - cron: "*/30 * * * *"   # checks every 30 minutes
+  workflow_dispatch:          # lets you run it by hand too
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download latest release APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download \
+            --repo dgreatversegamedev/Nightfall-releases \
+            --pattern "*.apk" \
+            --output Nightfall-latest.apk \
+            --clobber
+
+      - name: Commit only if the APK changed
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add Nightfall-latest.apk
+          if git diff --cached --quiet; then
+            echo "No new APK."
+          else
+            git commit -m "Update Nightfall-latest.apk"
+            git push
+          fi
