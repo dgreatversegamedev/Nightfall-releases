@@ -74,6 +74,9 @@ const REPO = "dgreatversegamedev/Nightfall-releases";
 // Backup name, only used if GitHub's release info can't be loaded.
 const APK_NAME = "Nightfall.apk";
 
+// APK copied next to this page by your release workflow (same site = no browser block).
+const LOCAL_APK = "Nightfall-latest.apk";
+
 const $ = id => document.getElementById(id);
 const dl = $("dl"), info = $("info"), sizeEl = $("size");
 const prog = $("prog"), fill = $("fill"), pct = $("pct"), mb = $("mb"), msg = $("msg");
@@ -104,7 +107,14 @@ async function startDownload(){
   fill.style.width = "0%"; pct.textContent = "0%";
 
   try {
-    const res = await fetch(asset.url, { headers: { Accept: "application/octet-stream" } });
+    let res = null;
+    try {                                   // 1) same-site copy (never blocked)
+      const l = await fetch(LOCAL_APK, { cache: "no-store" });
+      if (l.ok && l.body) res = l;
+    } catch (_) {}
+    if (!res) {                             // 2) straight from GitHub release
+      res = await fetch(asset.url, { headers: { Accept: "application/octet-stream" } });
+    }
     if (!res.ok || !res.body) throw new Error("HTTP " + res.status);
 
     const total = Number(res.headers.get("content-length")) || asset.size;
@@ -149,9 +159,11 @@ dl.addEventListener("click", startDownload);
 // ---- Load latest release info ----
 async function load(){
   try{
-    const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`);
+    const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, { cache: "no-store" });
     if(!res.ok) throw new Error(res.status);
     const r = await res.json();
+    if (r.tag_name === shownTag) return;   // nothing new, keep the page as is
+    shownTag = r.tag_name;
     const apk = (r.assets || []).find(a => a.name.toLowerCase().endsWith(".apk"));
 
     info.innerHTML = "";
@@ -165,6 +177,18 @@ async function load(){
     n.textContent = r.body || "";
     info.append(h, d, n);
 
+    // Tell returning visitors when a newer version has come out since their last visit
+    try {
+      const seen = localStorage.getItem("nf_seen");
+      if (seen && seen !== r.tag_name) {
+        const b = document.createElement("div");
+        b.className = "msg ok";
+        b.textContent = "New update available!";
+        info.prepend(b);
+      }
+      localStorage.setItem("nf_seen", r.tag_name);
+    } catch (_) {}
+
     if(apk){
       asset = {
         id: apk.id,
@@ -175,10 +199,17 @@ async function load(){
       sizeEl.textContent = r.tag_name + " · " + (apk.size / 1048576).toFixed(1) + " MB · APK";
     }
   }catch(e){
-    info.textContent = "Get the latest version of Nightfall:";
+    if (!shownTag) info.textContent = "Get the latest version of Nightfall:";
   }
 }
+let shownTag = "";
 load();
+
+// Check again whenever the visitor comes back to the page or tab
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && !dl.disabled) load();
+});
+window.addEventListener("pageshow", e => { if (e.persisted && !dl.disabled) load(); });
 </script>
 </body>
 </html>
